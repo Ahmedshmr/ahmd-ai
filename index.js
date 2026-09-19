@@ -10,7 +10,6 @@ import http from "http";
 dotenv.config();
 
 const DISCORD_TOKEN = process.env.DISCORD_TOKEN;
-// يدعم مفتاح واحد أو عدة مفاتيح مفصولة بفاصلة: key1,key2,key3
 const rawKeys = process.env.GEMINI_API_KEY || "";
 const API_KEYS = rawKeys.split(",").map(k => k.trim()).filter(Boolean);
 
@@ -42,7 +41,7 @@ const client = new Client({
   partials: [Partials.Channel, Partials.Message],
 });
 
-// 1. محرك الذكاء الاصطناعي الاحتياطي (مجاني 100% وبدون أي مفاتيح - يشتغل لو قوقل تعطلت)
+// محرك ذكاء اصطناعي احتياطي مجاني 100%
 async function fetchBackupAi(promptText) {
   try {
     const encoded = encodeURIComponent(promptText);
@@ -57,12 +56,10 @@ async function fetchBackupAi(promptText) {
   return null;
 }
 
-// 2. دالة المحادثة الذكية المقاومة للتوقف
+// دالة المحادثة الذكية
 async function generateAiReply(promptText) {
-  // استخدام النماذج المستقرة فقط التي توفر 1,500 رسالة يومياً
   const stableModels = ["gemini-2.5-flash", "gemini-2.0-flash-lite", "gemini-flash-latest"];
 
-  // تجربة مفاتيح Gemini المتاحة أولاً
   for (let attempt = 0; attempt < Math.max(API_KEYS.length, 1); attempt++) {
     const aiInstance = getNextGenAI();
     if (!aiInstance) break;
@@ -76,21 +73,18 @@ async function generateAiReply(promptText) {
         });
         if (res?.text) return res.text;
       } catch (err) {
-        // إذا كان خطأ 429 ننتقل للنموذج أو المفتاح التالي فوراً
         continue;
       }
     }
   }
 
-  // إذا انتهت كل حصص Gemini، يتدخل المحرك الاحتياطي المجاني فوراً!
-  console.log("🔄 جاري استخدام المحرك الذكي الاحتياطي لتفادي التوقف...");
   const backupReply = await fetchBackupAi(promptText);
   if (backupReply) return backupReply;
 
   throw new Error("تعذر جلب الرد، حاول بعد قليل.");
 }
 
-// 3. دالة توليد الصور المباشرة (فائقة الدقة والواقعية)
+// دالة توليد الصور
 function getImageUrl(promptText) {
   const lower = promptText.toLowerCase();
   let artPrompt = `cinematic 8k photorealistic portrait of ${promptText}, sharp focus, studio lighting`;
@@ -108,9 +102,13 @@ function getImageUrl(promptText) {
   return `https://image.pollinations.ai/prompt/${encoded}?width=1024&height=1024&nologo=true&seed=${randomSeed}`;
 }
 
+// تغيير الحالة هنا 👇
 client.once("ready", () => {
-  console.log(`🚀 البوت متصل وشغال 24/7 كـ: ${client.user.tag}`);
-  client.user.setActivity({ name: "الذكاء المستمر | !صورة | !تصفير", type: ActivityType.Playing });
+  console.log(`🚀 البوت متصل كـ: ${client.user.tag}`);
+  client.user.setActivity({
+    name: "منشن وازهلك",
+    type: ActivityType.Playing,
+  });
 });
 
 client.on("messageCreate", async (message) => {
@@ -123,11 +121,11 @@ client.on("messageCreate", async (message) => {
     clean = content.replace(new RegExp(`<@!?${client.user.id}>`, "g"), "").trim();
   }
 
-  // أمر تصفير الشات (!تصفير)
+  // 1. أمر تصفير الشات (!تصفير)
   if (content === "!تصفير" || content === "!nuke" || content === "!مسح الكل" || clean === "تصفير") {
     if (!message.member.permissions.has(PermissionsBitField.Flags.ManageChannels) && 
         !message.member.permissions.has(PermissionsBitField.Flags.Administrator)) {
-      return message.reply("⛔ هذا الأمر للمشرفين فقط (صلاحية Manage Channels)!");
+      return message.reply("⛔ هذا الأمر للمشرفين فقط!");
     }
     try {
       const ch = message.channel;
@@ -150,7 +148,7 @@ client.on("messageCreate", async (message) => {
     }
   }
 
-  // أمر مسح عدد معين من الرسائل (!مسح 20)
+  // 2. أمر مسح عدد معين من الرسائل (!مسح 20)
   if (content.startsWith("!clear") || content.startsWith("!مسح")) {
     if (!message.member.permissions.has(PermissionsBitField.Flags.ManageMessages)) {
       return message.reply("⛔ تحتاج لصلاحية (Manage Messages)!");
@@ -166,7 +164,7 @@ client.on("messageCreate", async (message) => {
     }
   }
 
-  // كشف طلبات الصور
+  // 3. كشف طلبات الصور
   const lower = clean.toLowerCase();
   const isImageRequest = 
     content.startsWith("!صورة ") || content.startsWith("!image ") ||
@@ -206,10 +204,10 @@ client.on("messageCreate", async (message) => {
     }
   }
 
-  // الرد على الأسئلة والمحادثة
+  // 4. الرد على الأسئلة والمحادثة
   if (isMentioned || content.startsWith("!ask ")) {
     if (clean.startsWith("!ask ")) clean = clean.slice(5).trim();
-    if (!clean) return message.reply("أهلاً بك! اسألني أي سؤال أو اطلب صورة بالمنشن أو بالأمر: `!صورة [الوصف]` 🎨");
+    if (!clean) return message.reply("أهلاً بك! منشن وازهلك في أي سؤال أو اطلب صورة 🤖");
 
     try {
       await message.channel.sendTyping();
@@ -224,7 +222,7 @@ client.on("messageCreate", async (message) => {
       }
     } catch (err) {
       console.error(err);
-      await message.reply("⚠️ واجهت مشكلة بسيطة في الاتصال، اسألني مرة أخرى وسأجيبك فوراً!");
+      await message.reply("⚠️ اسألني مرة أخرى وسأجيبك فوراً!");
     }
   }
 });
@@ -232,7 +230,7 @@ client.on("messageCreate", async (message) => {
 const PORT = process.env.PORT || 3000;
 http.createServer((req, res) => {
   res.writeHead(200, { "Content-Type": "text/plain; charset=utf-8" });
-  res.end("🤖 البوت يعمل 24/7 بدون انقطاع!");
+  res.end("🤖 البوت يعمل 24/7!");
 }).listen(PORT);
 
 client.login(DISCORD_TOKEN);
