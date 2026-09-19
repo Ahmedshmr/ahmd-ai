@@ -1,9 +1,8 @@
 // =================================================================
-// 🤖 Gemini AI Discord Bot - Discord AI Bot powered by Google Gemini (Node.js)
-// Library: discord.js v14 & @google/genai SDK
+// 🤖 Gemini AI Bot - Discord AI Bot powered by Google Gemini (Node.js)
 // =================================================================
 
-import { Client, GatewayIntentBits, Partials, EmbedBuilder, REST, Routes, SlashCommandBuilder, ActivityType } from "discord.js";
+import { Client, GatewayIntentBits, Partials, REST, Routes, SlashCommandBuilder, EmbedBuilder, ActivityType } from "discord.js";
 import { GoogleGenAI } from "@google/genai";
 import dotenv from "dotenv";
 
@@ -28,14 +27,14 @@ const ai = new GoogleGenAI({
   },
 });
 
-const SYSTEM_PROMPT = `أنت مساعد ذكاء اصطناعي ودود وشامل في سيرفر دسكورد، تتحدث باللغة العربية الفصحى المبسطة أو الإنجليزية حسب سؤال العضو. استخدم إيموجيات دسكورد بتوازن، ونظم إجاباتك بنقاط واضحة ومختصرة.`;
+const SYSTEM_PROMPT = `أنت مساعد ذكاء اصطناعي فائق الذكاء ومرح في سيرفر دسكورد، تتحدث باللغة العربية بطلاقة، وإجاباتك واضحة وموجزة ومفيدة مع استخدام الإيموجي المناسب.`;
 
 // 2. إعداد عميل Discord مع الصلاحيات المطلوبة (Intents)
 const client = new Client({
   intents: [
     GatewayIntentBits.Guilds,
     GatewayIntentBits.GuildMessages,
-    GatewayIntentBits.MessageContent, // ⚠️ هام: تأكد من تفعيل هذا الخيار في Discord Developer Portal
+    GatewayIntentBits.MessageContent, // تأكد من تفعيل هذا الخيار في Discord Developer Portal
     GatewayIntentBits.DirectMessages,
   ],
   partials: [Partials.Channel, Partials.Message],
@@ -91,6 +90,35 @@ client.once("ready", async () => {
   }
 });
 
+// دالة استدعاء ذكاء اصطناعي مرنة وموثوقة تدعم أحدث نماذج Gemini الرسمية
+async function generateAiReply(promptText, systemPrompt = SYSTEM_PROMPT) {
+  const modelsToTry = [
+    "gemini-flash-latest",
+    "gemini-3.8-flash",
+    "gemini-3.1-flash-lite",
+  ];
+
+  let lastError = null;
+  for (const model of modelsToTry) {
+    try {
+      const res = await ai.models.generateContent({
+        model,
+        contents: promptText,
+        config: {
+          systemInstruction: systemPrompt,
+        },
+      });
+      if (res && res.text) {
+        return res.text;
+      }
+    } catch (err) {
+      lastError = err;
+      console.warn(`⚠️ تعذر استخدام النموذج ${model}:`, err?.message || err);
+    }
+  }
+  throw lastError || new Error("فشل توليد الرد من جميع نماذج الذكاء الاصطناعي.");
+}
+
 // 3. الاستجابة للأوامر السريعة (Slash Commands)
 client.on("interactionCreate", async (interaction) => {
   if (!interaction.isChatInputCommand()) return;
@@ -99,31 +127,11 @@ client.on("interactionCreate", async (interaction) => {
 
   if (commandName === "ask") {
     const userPrompt = interaction.options.getString("prompt");
-    await interaction.deferReply(); // منح البوت وقتاً للتفكير والتوليد
+    await interaction.deferReply();
 
     try {
-      let response;
-      try {
-        response = await ai.models.generateContent({
-          model: "gemini-2.5-flash",
-          contents: userPrompt,
-          config: {
-            systemInstruction: SYSTEM_PROMPT,
-          },
-        });
-      } catch (firstErr) {
-        response = await ai.models.generateContent({
-          model: "gemini-1.5-flash",
-          contents: userPrompt,
-          config: {
-            systemInstruction: SYSTEM_PROMPT,
-          },
-        });
-      }
+      const replyText = await generateAiReply(userPrompt, SYSTEM_PROMPT);
 
-      const replyText = response.text || "عذراً، لم أستطع توليد إجابة.";
-
-      // إذا كان الرد طويلاً، نرسله كـ Embed أو مقطع
       if (replyText.length <= 2000) {
         await interaction.editReply(replyText);
       } else {
@@ -144,24 +152,14 @@ client.on("interactionCreate", async (interaction) => {
     await interaction.deferReply();
 
     try {
-      let response;
-      try {
-        response = await ai.models.generateContent({
-          model: "gemini-2.5-flash",
-          contents: `لخص النص التالي في 3 أو 4 نقاط واضحة:\n${textToSummarize}`,
-          config: { systemInstruction: "أنت مساعد تلخيص محترف في دسكورد." }
-        });
-      } catch (e) {
-        response = await ai.models.generateContent({
-          model: "gemini-1.5-flash",
-          contents: `لخص النص التالي في 3 أو 4 نقاط واضحة:\n${textToSummarize}`,
-          config: { systemInstruction: "أنت مساعد تلخيص محترف في دسكورد." }
-        });
-      }
+      const summaryText = await generateAiReply(
+        `لخص النص التالي في 3 أو 4 نقاط واضحة:\n${textToSummarize}`,
+        "أنت مساعد تلخيص محترف في دسكورد."
+      );
 
       const embed = new EmbedBuilder()
         .setTitle("📝 ملخص المحتوى بالذكاء الاصطناعي")
-        .setDescription(response.text || "لا يوجد محتوى")
+        .setDescription(summaryText || "لا يوجد محتوى")
         .setColor(0x5865f2)
         .setFooter({ text: "مدعوم بواسطة Google Gemini" });
 
@@ -229,23 +227,7 @@ client.on("messageCreate", async (message) => {
     try {
       await message.channel.sendTyping();
 
-      let response;
-      try {
-        response = await ai.models.generateContent({
-          model: "gemini-2.5-flash",
-          contents: cleanPrompt,
-          config: { systemInstruction: SYSTEM_PROMPT },
-        });
-      } catch (firstErr) {
-        console.warn("Gemini 2.5 failed, retrying with 1.5...", firstErr?.message);
-        response = await ai.models.generateContent({
-          model: "gemini-1.5-flash",
-          contents: cleanPrompt,
-          config: { systemInstruction: SYSTEM_PROMPT },
-        });
-      }
-
-      const answer = response.text || "عذراً، لم أستطع الإجابة.";
+      const answer = await generateAiReply(cleanPrompt, SYSTEM_PROMPT);
 
       if (answer.length <= 1950) {
         await message.reply(answer);
