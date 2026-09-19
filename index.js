@@ -102,13 +102,24 @@ client.on("interactionCreate", async (interaction) => {
     await interaction.deferReply(); // منح البوت وقتاً للتفكير والتوليد
 
     try {
-      const response = await ai.models.generateContent({
-        model: "gemini-3.8-flash",
-        contents: userPrompt,
-        config: {
-          systemInstruction: SYSTEM_PROMPT,
-        },
-      });
+      let response;
+      try {
+        response = await ai.models.generateContent({
+          model: "gemini-2.5-flash",
+          contents: userPrompt,
+          config: {
+            systemInstruction: SYSTEM_PROMPT,
+          },
+        });
+      } catch (firstErr) {
+        response = await ai.models.generateContent({
+          model: "gemini-1.5-flash",
+          contents: userPrompt,
+          config: {
+            systemInstruction: SYSTEM_PROMPT,
+          },
+        });
+      }
 
       const replyText = response.text || "عذراً، لم أستطع توليد إجابة.";
 
@@ -133,11 +144,20 @@ client.on("interactionCreate", async (interaction) => {
     await interaction.deferReply();
 
     try {
-      const response = await ai.models.generateContent({
-        model: "gemini-3.8-flash",
-        contents: `لخص النص التالي في 3 أو 4 نقاط واضحة:\n${textToSummarize}`,
-        config: { systemInstruction: "أنت مساعد تلخيص محترف في دسكورد." }
-      });
+      let response;
+      try {
+        response = await ai.models.generateContent({
+          model: "gemini-2.5-flash",
+          contents: `لخص النص التالي في 3 أو 4 نقاط واضحة:\n${textToSummarize}`,
+          config: { systemInstruction: "أنت مساعد تلخيص محترف في دسكورد." }
+        });
+      } catch (e) {
+        response = await ai.models.generateContent({
+          model: "gemini-1.5-flash",
+          contents: `لخص النص التالي في 3 أو 4 نقاط واضحة:\n${textToSummarize}`,
+          config: { systemInstruction: "أنت مساعد تلخيص محترف في دسكورد." }
+        });
+      }
 
       const embed = new EmbedBuilder()
         .setTitle("📝 ملخص المحتوى بالذكاء الاصطناعي")
@@ -171,22 +191,59 @@ client.on("interactionCreate", async (interaction) => {
 client.on("messageCreate", async (message) => {
   if (message.author.bot) return;
 
-  // إذا تم عمل منشن للبوت
-  if (client.user && message.mentions.has(client.user)) {
-    const cleanPrompt = message.content.replace(new RegExp(`<@!?${client.user.id}>`, "g"), "").trim();
+  const content = message.content.trim();
+  const isMentioned = client.user && message.mentions.has(client.user);
+  let cleanPrompt = content;
+  if (isMentioned && client.user) {
+    cleanPrompt = content.replace(new RegExp(`<@!?${client.user.id}>`, "g"), "").trim();
+  }
+
+  // دعم أمر مسح الرسائل !clear أو !مسح
+  if (content.startsWith("!clear") || cleanPrompt.startsWith("!clear") || content.startsWith("!مسح") || cleanPrompt.startsWith("!مسح")) {
+    const rawArgs = cleanPrompt.startsWith("!clear") || cleanPrompt.startsWith("!مسح") ? cleanPrompt : content;
+    const parts = rawArgs.split(/\s+/);
+    const count = parseInt(parts[1]) || 5;
+    const safeCount = Math.min(Math.max(count, 1), 50);
+
+    try {
+      await message.channel.bulkDelete(safeCount + 1, true);
+      const notify = await message.channel.send(`🧹 تم مسح ${safeCount} رسائل بنجاح!`);
+      setTimeout(() => notify.delete().catch(() => {}), 3500);
+    } catch (delErr) {
+      await message.reply("⚠️ لا أمتلك صلاحية مسح الرسائل (Manage Messages) في هذا الروم!");
+    }
+    return;
+  }
+
+  // الاستجابة للمنشن أو أمر !ask
+  const isPrefixAsk = content.startsWith("!ask ") || content.startsWith("!اسأل ");
+  if (isMentioned || isPrefixAsk) {
+    if (cleanPrompt.startsWith("!ask ")) cleanPrompt = cleanPrompt.slice(5).trim();
+    if (cleanPrompt.startsWith("!اسأل ")) cleanPrompt = cleanPrompt.slice(6).trim();
+
     if (!cleanPrompt) {
-      await message.reply("مرحباً! كيف يمكنني مساعدتك اليوم؟ اسألني أي سؤال! 🤖");
+      await message.reply("مرحباً بك! كيف يمكنني مساعدتك اليوم؟ اسألني أي سؤال! 🤖");
       return;
     }
 
     try {
       await message.channel.sendTyping();
 
-      const response = await ai.models.generateContent({
-        model: "gemini-3.8-flash",
-        contents: cleanPrompt,
-        config: { systemInstruction: SYSTEM_PROMPT },
-      });
+      let response;
+      try {
+        response = await ai.models.generateContent({
+          model: "gemini-2.5-flash",
+          contents: cleanPrompt,
+          config: { systemInstruction: SYSTEM_PROMPT },
+        });
+      } catch (firstErr) {
+        console.warn("Gemini 2.5 failed, retrying with 1.5...", firstErr?.message);
+        response = await ai.models.generateContent({
+          model: "gemini-1.5-flash",
+          contents: cleanPrompt,
+          config: { systemInstruction: SYSTEM_PROMPT },
+        });
+      }
 
       const answer = response.text || "عذراً، لم أستطع الإجابة.";
 
@@ -200,8 +257,13 @@ client.on("messageCreate", async (message) => {
         }
       }
     } catch (err) {
-      console.error(err);
-      await message.reply("⚠️ واجهت مشكلة في التفكير، حاول مرة أخرى لاحقاً!");
+      console.error("Gemini Error:", err);
+      const msg = err?.message || String(err);
+      if (msg.includes("API key not valid") || msg.includes("403") || msg.includes("API_KEY_INVALID")) {
+        await message.reply("⚠️ خطأ في مفتاح Gemini: تأكد من صحة المفتاح وتفعيله في Google AI Studio.");
+      } else {
+        await message.reply(`⚠️ واجهت مشكلة: ${msg.slice(0, 100)}`);
+      }
     }
   }
 });
