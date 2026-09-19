@@ -1,8 +1,8 @@
 // =================================================================
-// 🤖 Gemini & AI Art Bot - النسخة النهائية المعتمدة
+// 🤖 Gemini Super Bot - ذكاء اصطناعي مستمر بدون توقف + صور وتصفير
 // =================================================================
 
-import { Client, GatewayIntentBits, Partials, EmbedBuilder, AttachmentBuilder, PermissionsBitField, ActivityType } from "discord.js";
+import { Client, GatewayIntentBits, Partials, EmbedBuilder, PermissionsBitField, ActivityType } from "discord.js";
 import { GoogleGenAI } from "@google/genai";
 import dotenv from "dotenv";
 import http from "http";
@@ -10,19 +10,27 @@ import http from "http";
 dotenv.config();
 
 const DISCORD_TOKEN = process.env.DISCORD_TOKEN;
-const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
+// يدعم مفتاح واحد أو عدة مفاتيح مفصولة بفاصلة: key1,key2,key3
+const rawKeys = process.env.GEMINI_API_KEY || "";
+const API_KEYS = rawKeys.split(",").map(k => k.trim()).filter(Boolean);
 
-if (!DISCORD_TOKEN || !GEMINI_API_KEY) {
-  console.error("❌ تأكد من توفر المفاتيح في Render");
+if (!DISCORD_TOKEN) {
+  console.error("❌ تأكد من توفر DISCORD_TOKEN");
   process.exit(1);
 }
 
-const ai = new GoogleGenAI({
-  apiKey: GEMINI_API_KEY,
-  httpOptions: { headers: { "User-Agent": "aistudio-build" } },
-});
+let keyIndex = 0;
+function getNextGenAI() {
+  if (API_KEYS.length === 0) return null;
+  const currentKey = API_KEYS[keyIndex % API_KEYS.length];
+  keyIndex++;
+  return new GoogleGenAI({
+    apiKey: currentKey,
+    httpOptions: { headers: { "User-Agent": "aistudio-build" } },
+  });
+}
 
-const SYSTEM_PROMPT = `أنت مساعد ذكي ومرح في دسكورد، تتحدث باللغة العربية بأسلوب راقي ومختصر ومفيد، مع استخدام الإيموجي المناسب.`;
+const SYSTEM_PROMPT = `أنت مساعد ذكاء اصطناعي ذكي ومرح في سيرفر دسكورد، تتحدث باللغة العربية بأسلوب راقي وواضح ومفيد، وتستخدم الإيموجي المناسب.`;
 
 const client = new Client({
   intents: [
@@ -34,53 +42,75 @@ const client = new Client({
   partials: [Partials.Channel, Partials.Message],
 });
 
-// دالة المحادثة النصية مع إعادة المحاولة التلقائية
-async function generateAiReply(promptText) {
-  const models = ["gemini-flash-latest", "gemini-3.8-flash"];
-  let lastError = null;
+// 1. محرك الذكاء الاصطناعي الاحتياطي (مجاني 100% وبدون أي مفاتيح - يشتغل لو قوقل تعطلت)
+async function fetchBackupAi(promptText) {
+  try {
+    const encoded = encodeURIComponent(promptText);
+    const res = await fetch(`https://text.pollinations.ai/${encoded}?model=openai&system=${encodeURIComponent(SYSTEM_PROMPT)}`);
+    if (res.ok) {
+      const text = await res.text();
+      if (text && text.trim()) return text.trim();
+    }
+  } catch (e) {
+    console.warn("Backup AI failed:", e?.message);
+  }
+  return null;
+}
 
-  for (const modelName of models) {
-    try {
-      const res = await ai.models.generateContent({
-        model: modelName,
-        contents: promptText,
-        config: { systemInstruction: SYSTEM_PROMPT },
-      });
-      if (res?.text) return res.text;
-    } catch (err) {
-      lastError = err;
-      // إذا كان المفتاح مشغولاً (Rate limit 429)، ننتظر ثانية ونحاول مرة أخرى
-      if (err?.message?.includes("429") || err?.status === "RESOURCE_EXHAUSTED") {
-        await new Promise((r) => setTimeout(r, 1500));
+// 2. دالة المحادثة الذكية المقاومة للتوقف
+async function generateAiReply(promptText) {
+  // استخدام النماذج المستقرة فقط التي توفر 1,500 رسالة يومياً
+  const stableModels = ["gemini-2.5-flash", "gemini-2.0-flash-lite", "gemini-flash-latest"];
+
+  // تجربة مفاتيح Gemini المتاحة أولاً
+  for (let attempt = 0; attempt < Math.max(API_KEYS.length, 1); attempt++) {
+    const aiInstance = getNextGenAI();
+    if (!aiInstance) break;
+
+    for (const modelName of stableModels) {
+      try {
+        const res = await aiInstance.models.generateContent({
+          model: modelName,
+          contents: promptText,
+          config: { systemInstruction: SYSTEM_PROMPT },
+        });
+        if (res?.text) return res.text;
+      } catch (err) {
+        // إذا كان خطأ 429 ننتقل للنموذج أو المفتاح التالي فوراً
+        continue;
       }
     }
   }
-  throw lastError || new Error("المفتاح مشغول حالياً، يرجى الانتظار نصف دقيقة فقط.");
+
+  // إذا انتهت كل حصص Gemini، يتدخل المحرك الاحتياطي المجاني فوراً!
+  console.log("🔄 جاري استخدام المحرك الذكي الاحتياطي لتفادي التوقف...");
+  const backupReply = await fetchBackupAi(promptText);
+  if (backupReply) return backupReply;
+
+  throw new Error("تعذر جلب الرد، حاول بعد قليل.");
 }
 
-// دالة توليد الصور المضمونة 100% بدون أي أخطاء شبكة
-async function getImageUrl(promptText) {
+// 3. دالة توليد الصور المباشرة (فائقة الدقة والواقعية)
+function getImageUrl(promptText) {
   const lower = promptText.toLowerCase();
-
-  // تحسين ذكي ودقيق للزي السعودي والعربي
   let artPrompt = `cinematic 8k photorealistic portrait of ${promptText}, sharp focus, studio lighting`;
+
   if (lower.includes("شماغ") || lower.includes("ثوب") || lower.includes("سعودي")) {
-    artPrompt = `cinematic photorealistic portrait of a young Saudi man wearing authentic traditional red and white shemagh, black agal, and white thobe, detailed face, elegant background, ultra 8k resolution, professional photography`;
+    artPrompt = `cinematic photorealistic portrait of an authentic young Saudi Arab man wearing pristine traditional red and white shemagh, black agal, clean white thobe, handsome face, elegant luxury architectural background, ultra 8k resolution, professional photography`;
   } else if (lower.includes("صقر") || lower.includes("falcon")) {
-    artPrompt = `majestic majestic Arabian hunting falcon sitting on a desert perch, golden hour sunset, hyper-detailed feathers, 8k photography`;
+    artPrompt = `majestic Arabian hunting falcon sitting on a desert perch, golden hour sunset, hyper-detailed feathers, 8k photography`;
   } else if (lower.includes("سيارة") || lower.includes("car")) {
-    artPrompt = `supercar racing through Riyadh city at night, neon lights, 8k realistic automotive render`;
+    artPrompt = `luxury sports car racing in Riyadh city at night, neon lights, 8k realistic automotive render`;
   }
 
   const encoded = encodeURIComponent(artPrompt);
-  const randomSeed = Math.floor(Math.random() * 999999);
-  // رابط صورة مباشر وسريع يدعمه دسكورد فوراً
+  const randomSeed = Math.floor(Math.random() * 9999999);
   return `https://image.pollinations.ai/prompt/${encoded}?width=1024&height=1024&nologo=true&seed=${randomSeed}`;
 }
 
 client.once("ready", () => {
-  console.log(`🚀 البوت يعمل بنجاح كـ: ${client.user.tag}`);
-  client.user.setActivity({ name: "الذكاء وتوليد الصور | !صورة | !تصفير", type: ActivityType.Playing });
+  console.log(`🚀 البوت متصل وشغال 24/7 كـ: ${client.user.tag}`);
+  client.user.setActivity({ name: "الذكاء المستمر | !صورة | !تصفير", type: ActivityType.Playing });
 });
 
 client.on("messageCreate", async (message) => {
@@ -93,11 +123,11 @@ client.on("messageCreate", async (message) => {
     clean = content.replace(new RegExp(`<@!?${client.user.id}>`, "g"), "").trim();
   }
 
-  // 1. أمر تصفير الشات بالكامل (!تصفير)
+  // أمر تصفير الشات (!تصفير)
   if (content === "!تصفير" || content === "!nuke" || content === "!مسح الكل" || clean === "تصفير") {
     if (!message.member.permissions.has(PermissionsBitField.Flags.ManageChannels) && 
         !message.member.permissions.has(PermissionsBitField.Flags.Administrator)) {
-      return message.reply("⛔ هذا الأمر للمشرفين فقط!");
+      return message.reply("⛔ هذا الأمر للمشرفين فقط (صلاحية Manage Channels)!");
     }
     try {
       const ch = message.channel;
@@ -107,7 +137,7 @@ client.on("messageCreate", async (message) => {
       await newCh.setPosition(pos);
 
       const embed = new EmbedBuilder()
-        .setTitle("💥 تم تصفير الشات بنجاح!")
+        .setTitle("💥 تم تصفير ومسح الشات بالكامل!")
         .setDescription(`تم تنظيف الروم بالكامل بواسطة المشرف: **${message.author.username}** 🧹`)
         .setColor(0xed4245)
         .setTimestamp();
@@ -116,11 +146,11 @@ client.on("messageCreate", async (message) => {
       setTimeout(() => sent.delete().catch(() => {}), 5000);
       return;
     } catch {
-      return message.channel.send("⚠️ يحتاج البوت لرتبة تحتوي على صلاحية Administrator.");
+      return message.channel.send("⚠️ تأكد من إعطاء البوت رتبة Administrator.");
     }
   }
 
-  // 2. أمر مسح عدد معين من الرسائل (!مسح 20)
+  // أمر مسح عدد معين من الرسائل (!مسح 20)
   if (content.startsWith("!clear") || content.startsWith("!مسح")) {
     if (!message.member.permissions.has(PermissionsBitField.Flags.ManageMessages)) {
       return message.reply("⛔ تحتاج لصلاحية (Manage Messages)!");
@@ -128,15 +158,15 @@ client.on("messageCreate", async (message) => {
     const count = Math.min(Math.max(parseInt(content.split(/\s+/)[1]) || 10, 1), 100);
     try {
       await message.channel.bulkDelete(count + 1, true);
-      const m = await message.channel.send(`🧹 تم مسح **${count}** رسالة بنجاح!`);
+      const m = await message.channel.send(`🧹 تم مسح **${count}** رسالة!`);
       setTimeout(() => m.delete().catch(() => {}), 3000);
       return;
     } catch {
-      return message.reply("⚠️ استخدم `!تصفير` لمسح الروم بالكامل دفعة واحدة.");
+      return message.reply("⚠️ استخدم `!تصفير` لتنظيف الروم بالكامل.");
     }
   }
 
-  // 3. كشف أي طلب لصورة (مباشر وسلس 100%)
+  // كشف طلبات الصور
   const lower = clean.toLowerCase();
   const isImageRequest = 
     content.startsWith("!صورة ") || content.startsWith("!image ") ||
@@ -154,15 +184,15 @@ client.on("messageCreate", async (message) => {
 
     if (!imgPrompt) imgPrompt = "شخص لابس شماغ وثوب سعودي";
 
-    const waitMsg = await message.reply("🎨 **أبشر! جاري رسم الصورة الآن بأعلى دقة، لحظات...** ⏳");
+    const waitMsg = await message.reply("🎨 **أبشر! جاري رسم وتوليد الصورة لك الآن بأعلى دقة، لحظات...** ⏳");
 
     try {
       await message.channel.sendTyping();
-      const imageUrl = await getImageUrl(imgPrompt);
+      const imageUrl = getImageUrl(imgPrompt);
 
       const embed = new EmbedBuilder()
         .setTitle("🖼️ تفضل صورتك المطلوبة!")
-        .setDescription(`**طلبك:** ${imgPrompt}\n**الجودة:** فوتوغرافية فائقة الدقة (Ultra-HD) ✨`)
+        .setDescription(`**طلبك:** ${imgPrompt}\n**الجودة:** فوتوغرافية فائقة الواقعية (4K Ultra-HD) ✨`)
         .setImage(imageUrl)
         .setColor(0x5865f2)
         .setFooter({ text: `طُلبت بواسطة ${message.author.username}` })
@@ -172,11 +202,11 @@ client.on("messageCreate", async (message) => {
       return message.reply({ embeds: [embed] });
     } catch (err) {
       console.error(err);
-      return waitMsg.edit("❌ حدث خطأ، جرب كتابة: `!صورة شخص لابس شماغ`");
+      return waitMsg.edit("❌ حدث خطأ أثناء إرسال الصورة، أعد المحاولة.");
     }
   }
 
-  // 4. الرد على الأسئلة والمحادثة الذكية
+  // الرد على الأسئلة والمحادثة
   if (isMentioned || content.startsWith("!ask ")) {
     if (clean.startsWith("!ask ")) clean = clean.slice(5).trim();
     if (!clean) return message.reply("أهلاً بك! اسألني أي سؤال أو اطلب صورة بالمنشن أو بالأمر: `!صورة [الوصف]` 🎨");
@@ -194,20 +224,15 @@ client.on("messageCreate", async (message) => {
       }
     } catch (err) {
       console.error(err);
-      if (err?.message?.includes("429") || err?.status === "RESOURCE_EXHAUSTED") {
-        await message.reply("⏳ مفتاح Gemini مشغول بالأسئلة الآن، انتظر 30 ثانية واسألني مرة أخرى وسأجيبك فوراً!");
-      } else {
-        await message.reply("⚠️ واجهت مشكلة بسيطة في الاتصال، أعد السؤال بعد لحظات.");
-      }
+      await message.reply("⚠️ واجهت مشكلة بسيطة في الاتصال، اسألني مرة أخرى وسأجيبك فوراً!");
     }
   }
 });
 
-// خادم الـ Keep-Alive للبقاء متصلاً على Render 24/7
 const PORT = process.env.PORT || 3000;
 http.createServer((req, res) => {
   res.writeHead(200, { "Content-Type": "text/plain; charset=utf-8" });
-  res.end("🤖 البوت يعمل بكفاءة 24/7!");
+  res.end("🤖 البوت يعمل 24/7 بدون انقطاع!");
 }).listen(PORT);
 
 client.login(DISCORD_TOKEN);
