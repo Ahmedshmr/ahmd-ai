@@ -1,193 +1,88 @@
 // =================================================================
-// 🤖 Gemini AI Bot - Discord AI Bot powered by Google Gemini (Node.js)
+// 🤖 Gemini AI Bot - بوت الذكاء الاصطناعي، توليد الصور، والإدارة الشاملة
 // =================================================================
 
-import { Client, GatewayIntentBits, Partials, REST, Routes, SlashCommandBuilder, EmbedBuilder, ActivityType } from "discord.js";
+import { Client, GatewayIntentBits, Partials, EmbedBuilder, AttachmentBuilder, PermissionsBitField, ActivityType } from "discord.js";
 import { GoogleGenAI } from "@google/genai";
 import dotenv from "dotenv";
+import http from "http";
 
 dotenv.config();
 
 const DISCORD_TOKEN = process.env.DISCORD_TOKEN;
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
-const CLIENT_ID = process.env.CLIENT_ID; // Application ID from Discord Portal
 
 if (!DISCORD_TOKEN || !GEMINI_API_KEY) {
-  console.error("❌ خطأ: يرجى تحديد DISCORD_TOKEN و GEMINI_API_KEY في ملف .env أو في الكود مباشرة");
+  console.error("❌ خطأ: يرجى تحديد DISCORD_TOKEN و GEMINI_API_KEY");
   process.exit(1);
 }
 
-// 1. إعداد عميل Google Gemini
+// إعداد عميل Google AI
 const ai = new GoogleGenAI({
   apiKey: GEMINI_API_KEY,
   httpOptions: {
-    headers: {
-      "User-Agent": "aistudio-build",
-    },
+    headers: { "User-Agent": "aistudio-build" },
   },
 });
 
 const SYSTEM_PROMPT = `أنت مساعد ذكاء اصطناعي فائق الذكاء ومرح في سيرفر دسكورد، تتحدث باللغة العربية بطلاقة، وإجاباتك واضحة وموجزة ومفيدة مع استخدام الإيموجي المناسب.`;
 
-// 2. إعداد عميل Discord مع الصلاحيات المطلوبة (Intents)
 const client = new Client({
   intents: [
     GatewayIntentBits.Guilds,
     GatewayIntentBits.GuildMessages,
-    GatewayIntentBits.MessageContent, // تأكد من تفعيل هذا الخيار في Discord Developer Portal
+    GatewayIntentBits.MessageContent,
     GatewayIntentBits.DirectMessages,
   ],
   partials: [Partials.Channel, Partials.Message],
 });
 
-// تعريف الأوامر السريعة (Slash Commands)
-const commands = [
-  new SlashCommandBuilder()
-    .setName("ask")
-    .setDescription("اسأل الذكاء الاصطناعي Gemini أي سؤال")
-    .addStringOption(option =>
-      option.setName("prompt")
-        .setDescription("سؤالك أو طلبك")
-        .setRequired(true)
-    ),
-  new SlashCommandBuilder()
-    .setName("summarize")
-    .setDescription("تلخيص نص طويل في نقاط سريعة")
-    .addStringOption(option =>
-      option.setName("text")
-        .setDescription("النص المراد تلخيصه")
-        .setRequired(true)
-    ),
-  new SlashCommandBuilder()
-    .setName("help")
-    .setDescription("معلومات عن البوت وقائمة الأوامر"),
-].map(command => command.toJSON());
-
-// تسجيل الأوامر عند تشغيل البوت
-async function registerCommands() {
-  try {
-    const rest = new REST({ version: "10" }).setToken(DISCORD_TOKEN);
-    console.log("⏳ جاري تسجيل الأوامر السريعة (Slash Commands)...");
-    await rest.put(
-      Routes.applicationCommands(CLIENT_ID),
-      { body: commands }
-    );
-    console.log("✅ تم تسجيل الأوامر بنجاح!");
-  } catch (error) {
-    console.error("❌ فشل تسجيل الأوامر:", error);
-  }
-}
-
-client.once("ready", async () => {
-  console.log(`🚀 البوت متصل الآن بنجاح كـ: ${client.user.tag}`);
-  client.user.setActivity({
-    name: "Gemini AI | /ask",
-    type: ActivityType.Playing,
-  });
-
-  if (CLIENT_ID) {
-    await registerCommands();
-  }
-});
-
-// دالة استدعاء ذكاء اصطناعي مرنة وموثوقة تدعم أحدث نماذج Gemini الرسمية
+// دالة توليد النصوص
 async function generateAiReply(promptText, systemPrompt = SYSTEM_PROMPT) {
-  const modelsToTry = [
-    "gemini-flash-latest",
-    "gemini-3.8-flash",
-    "gemini-3.1-flash-lite",
-  ];
-
-  let lastError = null;
-  for (const model of modelsToTry) {
+  const models = ["gemini-flash-latest", "gemini-3.8-flash", "gemini-3.1-flash-lite"];
+  let lastErr = null;
+  for (const m of models) {
     try {
       const res = await ai.models.generateContent({
-        model,
+        model: m,
         contents: promptText,
-        config: {
-          systemInstruction: systemPrompt,
-        },
+        config: { systemInstruction: systemPrompt },
       });
-      if (res && res.text) {
-        return res.text;
-      }
-    } catch (err) {
-      lastError = err;
-      console.warn(`⚠️ تعذر استخدام النموذج ${model}:`, err?.message || err);
+      if (res?.text) return res.text;
+    } catch (e) {
+      lastErr = e;
     }
   }
-  throw lastError || new Error("فشل توليد الرد من جميع نماذج الذكاء الاصطناعي.");
+  throw lastErr || new Error("فشل توليد النص.");
 }
 
-// 3. الاستجابة للأوامر السريعة (Slash Commands)
-client.on("interactionCreate", async (interaction) => {
-  if (!interaction.isChatInputCommand()) return;
+// دالة توليد الصور
+async function generateAiImage(imagePrompt) {
+  const response = await ai.models.generateImages({
+    model: "imagen-3.0-generate-002",
+    prompt: imagePrompt,
+    config: {
+      numberOfImages: 1,
+      outputMimeType: "image/jpeg",
+      aspectRatio: "1:1",
+    },
+  });
 
-  const { commandName } = interaction;
+  const base64Bytes = response.generatedImages?.[0]?.image?.imageBytes;
+  if (!base64Bytes) throw new Error("لم يتم إرجاع أي صورة.");
+  return Buffer.from(base64Bytes, "base64");
+}
 
-  if (commandName === "ask") {
-    const userPrompt = interaction.options.getString("prompt");
-    await interaction.deferReply();
-
-    try {
-      const replyText = await generateAiReply(userPrompt, SYSTEM_PROMPT);
-
-      if (replyText.length <= 2000) {
-        await interaction.editReply(replyText);
-      } else {
-        const chunks = replyText.match(/[\s\S]{1,1900}/g) || [replyText];
-        await interaction.editReply(chunks[0]);
-        for (let i = 1; i < chunks.length; i++) {
-          await interaction.followUp(chunks[i]);
-        }
-      }
-    } catch (error) {
-      console.error("Error generating content:", error);
-      await interaction.editReply("❌ حدث خطأ أثناء الاتصال بالذكاء الاصطناعي.");
-    }
-  }
-
-  if (commandName === "summarize") {
-    const textToSummarize = interaction.options.getString("text");
-    await interaction.deferReply();
-
-    try {
-      const summaryText = await generateAiReply(
-        `لخص النص التالي في 3 أو 4 نقاط واضحة:\n${textToSummarize}`,
-        "أنت مساعد تلخيص محترف في دسكورد."
-      );
-
-      const embed = new EmbedBuilder()
-        .setTitle("📝 ملخص المحتوى بالذكاء الاصطناعي")
-        .setDescription(summaryText || "لا يوجد محتوى")
-        .setColor(0x5865f2)
-        .setFooter({ text: "مدعوم بواسطة Google Gemini" });
-
-      await interaction.editReply({ embeds: [embed] });
-    } catch (error) {
-      await interaction.editReply("❌ تعذر التلخيص في الوقت الحالي.");
-    }
-  }
-
-  if (commandName === "help") {
-    const helpEmbed = new EmbedBuilder()
-      .setTitle("🤖 أوامر بوت الذكاء الاصطناعي")
-      .setDescription("مرحباً بك! أنا بوت ذكاء اصطناعي أعمل بنموذج Google Gemini.")
-      .addFields(
-        { name: "🔹 /ask [سؤالك]", value: "اطرح أي سؤال أو اطلب كتابة كود أو ترجمة.", inline: false },
-        { name: "🔹 /summarize [النص]", value: "تلخيص فوري لأي مقال أو رسالة طويلة.", inline: false },
-        { name: "🔹 الإشارة للبوت @Mention", value: "يمكنك منشن البوت في أي شات والتحدث معه مباشرة!", inline: false }
-      )
-      .setColor(0x5865f2)
-      .setTimestamp();
-
-    await interaction.reply({ embeds: [helpEmbed] });
-  }
+client.once("ready", () => {
+  console.log(`🚀 البوت متصل بنجاح كـ: ${client.user.tag}`);
+  client.user.setActivity({
+    name: "الذكاء الاصطناعي | !صورة | !تصفير",
+    type: ActivityType.Playing,
+  });
 });
 
-// 4. الاستجابة لمنشن البوت في الشات العادي
 client.on("messageCreate", async (message) => {
-  if (message.author.bot) return;
+  if (message.author.bot || !message.guild) return;
 
   const content = message.content.trim();
   const isMentioned = client.user && message.mentions.has(client.user);
@@ -196,37 +91,128 @@ client.on("messageCreate", async (message) => {
     cleanPrompt = content.replace(new RegExp(`<@!?${client.user.id}>`, "g"), "").trim();
   }
 
-  // دعم أمر مسح الرسائل !clear أو !مسح
-  if (content.startsWith("!clear") || cleanPrompt.startsWith("!clear") || content.startsWith("!مسح") || cleanPrompt.startsWith("!مسح")) {
-    const rawArgs = cleanPrompt.startsWith("!clear") || cleanPrompt.startsWith("!مسح") ? cleanPrompt : content;
-    const parts = rawArgs.split(/\s+/);
-    const count = parseInt(parts[1]) || 5;
-    const safeCount = Math.min(Math.max(count, 1), 50);
+  // ===================== [ 1. الأوامر الإدارية ] =====================
+
+  // أ) مسح الروم بالكامل (Nuke / تصفير الشات)
+  if (content === "!تصفير" || content === "!nuke" || content === "!مسح الكل" || content === "!clear all") {
+    // التحقق من صلاحية العضو
+    if (!message.member.permissions.has(PermissionsBitField.Flags.ManageChannels) && 
+        !message.member.permissions.has(PermissionsBitField.Flags.Administrator)) {
+      return message.reply("⛔ هذا الأمر مخصص للمشرفين فقط (يتطلب صلاحية إدارة القنوات Manage Channels)!");
+    }
 
     try {
-      await message.channel.bulkDelete(safeCount + 1, true);
-      const notify = await message.channel.send(`🧹 تم مسح ${safeCount} رسائل بنجاح!`);
-      setTimeout(() => notify.delete().catch(() => {}), 3500);
-    } catch (delErr) {
-      await message.reply("⚠️ لا أمتلك صلاحية مسح الرسائل (Manage Messages) في هذا الروم!");
+      const channel = message.channel;
+      const position = channel.position;
+      const waitMsg = await message.reply("💣 جاري تصفير الشات ومسح كافة الرسائل نهائياً...");
+
+      // استنساخ الروم وحذف القديم لمسح كل الرسائل مهما كان عددها وتاريخها
+      const newChannel = await channel.clone();
+      await channel.delete();
+      await newChannel.setPosition(position);
+
+      const nukeEmbed = new EmbedBuilder()
+        .setTitle("💥 تم تصفير الشات بنجاح!")
+        .setDescription(`تم مسح كل رسائل الروم بواسطة المشرف: **${message.author.username}** 🧹`)
+        .setColor(0xed4245)
+        .setImage("https://media.giphy.com/media/oe33xf3B50fsc/giphy.gif")
+        .setTimestamp();
+
+      const sent = await newChannel.send({ embeds: [nukeEmbed] });
+      setTimeout(() => sent.delete().catch(() => {}), 7000);
+      return;
+    } catch (err) {
+      console.error(err);
+      return message.channel.send("⚠️ حدث خطأ أثناء تصفير الشات. تأكد من إعطاء البوت صلاحية Manage Channels و Administrator!");
     }
-    return;
   }
 
-  // الاستجابة للمنشن أو أمر !ask
+  // ب) مسح عدد محدد من الرسائل (!مسح [عدد])
+  if (content.startsWith("!clear") || content.startsWith("!مسح")) {
+    if (!message.member.permissions.has(PermissionsBitField.Flags.ManageMessages)) {
+      return message.reply("⛔ تحتاج إلى صلاحية (Manage Messages) لاستخدام هذا الأمر!");
+    }
+
+    const parts = content.split(/\s+/);
+    const count = Math.min(Math.max(parseInt(parts[1]) || 10, 1), 100);
+
+    try {
+      await message.channel.bulkDelete(count + 1, true);
+      const notify = await message.channel.send(`🧹 تم مسح **${count}** رسالة بنجاح!`);
+      setTimeout(() => notify.delete().catch(() => {}), 4000);
+      return;
+    } catch (delErr) {
+      return message.reply("⚠️ لا يمكن مسح الرسائل الأقدم من 14 يوماً عبر الحذف السريع. استخدم `!تصفير` لتنظيف الروم بالكامل!");
+    }
+  }
+
+  // ج) أمر الميوت السريع (!ميوت @عضو [دقائق])
+  if (content.startsWith("!ميوت ") || content.startsWith("!mute ")) {
+    if (!message.member.permissions.has(PermissionsBitField.Flags.ModerateMembers)) {
+      return message.reply("⛔ تحتاج إلى صلاحية (Timeout Members)!");
+    }
+    const target = message.mentions.members.first();
+    if (!target) return message.reply("⚠️ حدد العضو بالمنشن: `!ميوت @عضو 10`");
+
+    const parts = content.split(/\s+/);
+    const minutes = parseInt(parts[2]) || 10;
+    try {
+      await target.timeout(minutes * 60 * 1000, `طُلب بواسطة ${message.author.tag}`);
+      return message.reply(`🔇 تم إسكات **${target.user.username}** لمدة ${minutes} دقيقة بنجاح!`);
+    } catch {
+      return message.reply("⚠️ لا أستطيع إسكات هذا العضو (قد تكون رتبته أعلى من رتبة البوت).");
+    }
+  }
+
+  // ===================== [ 2. أمر توليد الصور ] =====================
+  const isImageCmd = content.startsWith("!صورة ") || content.startsWith("!image ") ||
+                     (isMentioned && (cleanPrompt.startsWith("ارسم ") || cleanPrompt.startsWith("ولد صورة ")));
+
+  if (isImageCmd) {
+    let imgPrompt = cleanPrompt;
+    if (imgPrompt.startsWith("!صورة ")) imgPrompt = imgPrompt.slice(6).trim();
+    else if (imgPrompt.startsWith("!image ")) imgPrompt = imgPrompt.slice(7).trim();
+    else if (imgPrompt.startsWith("ارسم ")) imgPrompt = imgPrompt.slice(5).trim();
+    else if (imgPrompt.startsWith("ولد صورة ")) imgPrompt = imgPrompt.slice(9).trim();
+
+    if (!imgPrompt) {
+      return message.reply("⚠️ اكتب وصف الصورة المطلوب، مثال:\n`!صورة فارس عربي في قلعة تاريخية وقت الغروب`");
+    }
+
+    const waitMsg = await message.reply("🎨 جاري رسم صورتك بأحدث نموذج ذكاء اصطناعي (Imagen 3)، لحظات...");
+    try {
+      await message.channel.sendTyping();
+      const imgBuffer = await generateAiImage(imgPrompt);
+      const attachment = new AttachmentBuilder(imgBuffer, { name: "ai_art.jpg" });
+
+      const embed = new EmbedBuilder()
+        .setTitle("🖼️ تم توليد الصورة بنجاح!")
+        .setDescription(`**الوصف:** ${imgPrompt}`)
+        .setImage("attachment://ai_art.jpg")
+        .setColor(0x5865f2)
+        .setFooter({ text: `طُلبت بواسطة ${message.author.username}` })
+        .setTimestamp();
+
+      await waitMsg.delete().catch(() => {});
+      return message.reply({ embeds: [embed], files: [attachment] });
+    } catch (err) {
+      console.error(err);
+      return waitMsg.edit("❌ تعذر توليد الصورة، تأكد من صحة المفتاح وأن الوصف ملائم.");
+    }
+  }
+
+  // ===================== [ 3. التحدث والدردشة الذكية ] =====================
   const isPrefixAsk = content.startsWith("!ask ") || content.startsWith("!اسأل ");
   if (isMentioned || isPrefixAsk) {
     if (cleanPrompt.startsWith("!ask ")) cleanPrompt = cleanPrompt.slice(5).trim();
     if (cleanPrompt.startsWith("!اسأل ")) cleanPrompt = cleanPrompt.slice(6).trim();
 
     if (!cleanPrompt) {
-      await message.reply("مرحباً بك! كيف يمكنني مساعدتك اليوم؟ اسألني أي سؤال! 🤖");
-      return;
+      return message.reply("مرحباً بك! أنا في خدمتك: اسألني أي سؤال، أو استخدم `!صورة [الوصف]` لتوليد الصور، أو `!تصفير` لمسح الشات 🤖");
     }
 
     try {
       await message.channel.sendTyping();
-
       const answer = await generateAiReply(cleanPrompt, SYSTEM_PROMPT);
 
       if (answer.length <= 1950) {
@@ -239,26 +225,19 @@ client.on("messageCreate", async (message) => {
         }
       }
     } catch (err) {
-      console.error("Gemini Error:", err);
-      const msg = err?.message || String(err);
-      if (msg.includes("API key not valid") || msg.includes("403") || msg.includes("API_KEY_INVALID")) {
-        await message.reply("⚠️ خطأ في مفتاح Gemini: تأكد من صحة المفتاح وتفعيله في Google AI Studio.");
-      } else {
-        await message.reply(`⚠️ واجهت مشكلة: ${msg.slice(0, 100)}`);
-      }
+      console.error(err);
+      await message.reply("⚠️ حدث خطأ أثناء معالجة السؤال، يرجى المحاولة لاحقاً.");
     }
   }
 });
 
-// خادم خفيف لإبقاء البوت متصلاً 24/7 على الاستضافات المجانية (Render / Koyeb / Railway)
-import http from "http";
+// خادم الـ Keep-Alive للبقاء متصلاً على Render
 const PORT = process.env.PORT || 3000;
 http.createServer((req, res) => {
   res.writeHead(200, { "Content-Type": "text/plain; charset=utf-8" });
-  res.end("🤖 بوت دسكورد للذكاء الاصطناعي يعمل 24/7 بنجاح!");
+  res.end("🤖 البوت يعمل بكفاءة 24/7 مع كافة صلاحيات الإدارة وتوليد الصور!");
 }).listen(PORT, () => {
-  console.log(`🌐 خادم Keep-Alive يعمل على المنفذ: ${PORT}`);
+  console.log(`🌐 Server running on port: ${PORT}`);
 });
 
-// تسجيل الدخول
 client.login(DISCORD_TOKEN);
