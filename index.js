@@ -1,21 +1,26 @@
 // =================================================================
-// 🤖 Ahmd Bot - النسخة السريعة والمستقرة 100%
+// 🤖 Ahmd Bot - الذكاء الاصطناعي الحقيقي وتوليد الصور وتصفير الشات
 // =================================================================
 
 import { Client, GatewayIntentBits, Partials, EmbedBuilder, PermissionsBitField, ActivityType } from "discord.js";
+import { GoogleGenAI } from "@google/genai";
 import dotenv from "dotenv";
 import http from "http";
 
 dotenv.config();
 
 const DISCORD_TOKEN = process.env.DISCORD_TOKEN;
+const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
 
-if (!DISCORD_TOKEN) {
-  console.error("❌ تأكد من توفر DISCORD_TOKEN في Render");
+if (!DISCORD_TOKEN || !GEMINI_API_KEY) {
+  console.error("❌ تأكد من توفر DISCORD_TOKEN و GEMINI_API_KEY في Render");
   process.exit(1);
 }
 
-const SYSTEM_PROMPT = `أنت مساعد ذكاء اصطناعي سعودي ذكي ومرح في سيرفر دسكورد، تتحدث باللغة العربية بأسلوب راقي وواضح، وتستخدم الإيموجي المناسب.`;
+// إعداد Google AI الرسمي
+const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY.trim() });
+
+const SYSTEM_PROMPT = `أنت بوت ذكي ومرح في سيرفر دسكورد، اسمك "Ahmd Bot". تتحدث باللهجة السعودية والعربية بأسلوب عفوي وودود وخفيف دم. أجب دائماً على قدر السؤال وافعل ما يطلبه منك المستخدم بمرح!`;
 
 const client = new Client({
   intents: [
@@ -27,40 +32,25 @@ const client = new Client({
   partials: [Partials.Channel, Partials.Message],
 });
 
-// دالة المحادثة الفورية الفائقة (لا تتوقف ولا تعتمد على حصص قوقل المحدودة!)
-async function askAI(userPrompt) {
-  try {
-    const res = await fetch("https://text.pollinations.ai/", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        messages: [
-          { role: "system", content: SYSTEM_PROMPT },
-          { role: "user", content: userPrompt }
-        ],
-        model: "mistral",
-        jsonMode: false
-      })
-    });
+// دالة المحادثة الحقيقية عبر Gemini
+async function askGemini(promptText) {
+  const models = ["gemini-1.5-flash", "gemini-2.0-flash", "gemini-1.5-pro"];
+  let lastErr = null;
 
-    if (res.ok) {
-      const text = await res.text();
-      if (text && text.trim()) return text.trim();
+  for (const m of models) {
+    try {
+      const response = await ai.models.generateContent({
+        model: m,
+        contents: promptText,
+        config: { systemInstruction: SYSTEM_PROMPT },
+      });
+      if (response?.text) return response.text;
+    } catch (e) {
+      lastErr = e;
     }
-  } catch (e) {
-    console.error("AI Error:", e);
   }
 
-  // محرك بديل فوري في حال تعثر الأول
-  try {
-    const res2 = await fetch(`https://text.pollinations.ai/${encodeURIComponent(userPrompt)}?model=searchgpt`);
-    if (res2.ok) {
-      const t = await res2.text();
-      if (t && t.trim()) return t.trim();
-    }
-  } catch (err) {}
-
-  return "هلا وغلا! معك حمودي الذكي، اسألني اللي تبيه وأبشر بالرد السريع 🇸🇦✨";
+  throw lastErr || new Error("فشل الرد");
 }
 
 // دالة توليد الصور
@@ -69,7 +59,7 @@ function getImageUrl(promptText) {
   let artPrompt = `cinematic 8k photorealistic portrait of ${promptText}, sharp focus, studio lighting`;
 
   if (lower.includes("شماغ") || lower.includes("ثوب") || lower.includes("سعودي")) {
-    artPrompt = `cinematic photorealistic portrait of an authentic handsome young Saudi Arab man wearing pristine traditional red and white shemagh, black agal, clean white thobe, elegant luxury background, ultra 8k resolution, professional photography`;
+    artPrompt = `cinematic photorealistic portrait of a young Saudi man wearing traditional red and white shemagh, black agal, and white thobe, handsome, high detail, 8k resolution, professional photography`;
   } else if (lower.includes("صقر") || lower.includes("falcon")) {
     artPrompt = `majestic Arabian hunting falcon sitting on a desert perch, golden hour sunset, hyper-detailed feathers, 8k photography`;
   } else if (lower.includes("سيارة") || lower.includes("car")) {
@@ -82,7 +72,7 @@ function getImageUrl(promptText) {
 }
 
 client.once("ready", () => {
-  console.log(`🚀 البوت شغال ومتصل كـ: ${client.user.tag}`);
+  console.log(`🚀 البوت متصل وشغال كـ: ${client.user.tag}`);
   client.user.setActivity({
     name: "منشن وازهلك",
     type: ActivityType.Playing,
@@ -160,7 +150,7 @@ client.on("messageCreate", async (message) => {
 
     if (!imgPrompt) imgPrompt = "شخص لابس شماغ وثوب سعودي";
 
-    const waitMsg = await message.reply("🎨 **أبشر! جاري رسم صورتك بأعلى دقة، لحظات...** ⏳");
+    const waitMsg = await message.reply("🎨 **أبشر! جاري رسم وتوليد الصورة بأعلى دقة، لحظات...** ⏳");
 
     try {
       await message.channel.sendTyping();
@@ -182,14 +172,14 @@ client.on("messageCreate", async (message) => {
     }
   }
 
-  // 4. الرد على الأسئلة والمحادثة
+  // 4. المحادثة الحقيقية والذكية
   if (isMentioned || content.startsWith("!ask ")) {
     if (clean.startsWith("!ask ")) clean = clean.slice(5).trim();
-    if (!clean) return message.reply("أهلاً بك يا غالي! منشن وازهلك، آمرني وش ودك تسأل عنه؟ 🤖");
+    if (!clean) return message.reply("هلا وغلا! سم آمرني وش بغيت؟ 🤖");
 
     try {
       await message.channel.sendTyping();
-      const reply = await askAI(clean);
+      const reply = await askGemini(clean);
 
       if (reply.length <= 1950) {
         await message.reply(reply);
@@ -199,12 +189,13 @@ client.on("messageCreate", async (message) => {
         for (let i = 1; i < parts.length; i++) await message.channel.send(parts[i]);
       }
     } catch (err) {
-      console.error(err);
-      await message.reply("هلا بك يا غالي! أعد المنشن وراح أرد عليك فوراً ✨");
+      console.error("Gemini Error:", err?.message);
+      await message.reply("هلا بك! حصل ضغط خفيف بالاتصال، اعد المنشن وسأرد عليك فوراً ✨");
     }
   }
 });
 
+// خادم الـ Keep-Alive
 const PORT = process.env.PORT || 3000;
 http.createServer((req, res) => {
   res.writeHead(200, { "Content-Type": "text/plain; charset=utf-8" });
