@@ -1,5 +1,5 @@
 // =================================================================
-// 🤖 Ahmd Bot - الذكاء الاصطناعي الحقيقي وتوليد الصور وتصفير الشات
+// 🤖 Ahmd Bot - النسخة النهائية المعتمدة الرسمية
 // =================================================================
 
 import { Client, GatewayIntentBits, Partials, EmbedBuilder, PermissionsBitField, ActivityType } from "discord.js";
@@ -13,14 +13,14 @@ const DISCORD_TOKEN = process.env.DISCORD_TOKEN;
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
 
 if (!DISCORD_TOKEN || !GEMINI_API_KEY) {
-  console.error("❌ تأكد من توفر DISCORD_TOKEN و GEMINI_API_KEY في Render");
+  console.error("❌ تأكد من توفر المفاتيح");
   process.exit(1);
 }
 
-// إعداد Google AI الرسمي
+// الاتصال المباشر بقوقل
 const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY.trim() });
 
-const SYSTEM_PROMPT = `أنت بوت ذكي ومرح في سيرفر دسكورد، اسمك "Ahmd Bot". تتحدث باللهجة السعودية والعربية بأسلوب عفوي وودود وخفيف دم. أجب دائماً على قدر السؤال وافعل ما يطلبه منك المستخدم بمرح!`;
+const SYSTEM_PROMPT = `أنت بوت ذكي ومرح في سيرفر دسكورد، اسمك "Ahmd Bot". تتحدث باللهجة السعودية والعربية بأسلوب عفوي وودود ومرح. أجب دائماً على قدر السؤال وافعل ما يطلبه منك المستخدم بكل سرور!`;
 
 const client = new Client({
   intents: [
@@ -32,25 +32,17 @@ const client = new Client({
   partials: [Partials.Channel, Partials.Message],
 });
 
-// دالة المحادثة الحقيقية عبر Gemini
+// دالة المحادثة بالنموذج الرسمي المعتمد فقط
 async function askGemini(promptText) {
-  const models = ["gemini-1.5-flash", "gemini-2.0-flash", "gemini-1.5-pro"];
-  let lastErr = null;
+  const response = await ai.models.generateContent({
+    model: "gemini-2.5-flash",
+    contents: promptText,
+    config: {
+      systemInstruction: SYSTEM_PROMPT,
+    },
+  });
 
-  for (const m of models) {
-    try {
-      const response = await ai.models.generateContent({
-        model: m,
-        contents: promptText,
-        config: { systemInstruction: SYSTEM_PROMPT },
-      });
-      if (response?.text) return response.text;
-    } catch (e) {
-      lastErr = e;
-    }
-  }
-
-  throw lastErr || new Error("فشل الرد");
+  return response.text;
 }
 
 // دالة توليد الصور
@@ -59,7 +51,7 @@ function getImageUrl(promptText) {
   let artPrompt = `cinematic 8k photorealistic portrait of ${promptText}, sharp focus, studio lighting`;
 
   if (lower.includes("شماغ") || lower.includes("ثوب") || lower.includes("سعودي")) {
-    artPrompt = `cinematic photorealistic portrait of a young Saudi man wearing traditional red and white shemagh, black agal, and white thobe, handsome, high detail, 8k resolution, professional photography`;
+    artPrompt = `cinematic photorealistic portrait of an authentic young Saudi Arab man wearing pristine traditional red and white shemagh, black agal, clean white thobe, handsome face, elegant luxury architectural background, ultra 8k resolution, professional photography`;
   } else if (lower.includes("صقر") || lower.includes("falcon")) {
     artPrompt = `majestic Arabian hunting falcon sitting on a desert perch, golden hour sunset, hyper-detailed feathers, 8k photography`;
   } else if (lower.includes("سيارة") || lower.includes("car")) {
@@ -72,7 +64,7 @@ function getImageUrl(promptText) {
 }
 
 client.once("ready", () => {
-  console.log(`🚀 البوت متصل وشغال كـ: ${client.user.tag}`);
+  console.log(`🚀 البوت متصل كـ: ${client.user.tag}`);
   client.user.setActivity({
     name: "منشن وازهلك",
     type: ActivityType.Playing,
@@ -89,7 +81,7 @@ client.on("messageCreate", async (message) => {
     clean = content.replace(new RegExp(`<@!?${client.user.id}>`, "g"), "").trim();
   }
 
-  // 1. أمر مسح وتصفير الشات (!تصفير)
+  // 1. أمر تصفير الشات (!تصفير)
   if (content === "!تصفير" || content === "!nuke" || content === "!مسح الكل" || clean === "تصفير") {
     if (!message.member.permissions.has(PermissionsBitField.Flags.ManageChannels) && 
         !message.member.permissions.has(PermissionsBitField.Flags.Administrator)) {
@@ -172,10 +164,10 @@ client.on("messageCreate", async (message) => {
     }
   }
 
-  // 4. المحادثة الحقيقية والذكية
+  // 4. المحادثة الذكية الحقيقية
   if (isMentioned || content.startsWith("!ask ")) {
     if (clean.startsWith("!ask ")) clean = clean.slice(5).trim();
-    if (!clean) return message.reply("هلا وغلا! سم آمرني وش بغيت؟ 🤖");
+    if (!clean) return message.reply("هلا وغلا! منشن وازهلك، سم آمرني وش بغيت؟ 🤖");
 
     try {
       await message.channel.sendTyping();
@@ -189,8 +181,8 @@ client.on("messageCreate", async (message) => {
         for (let i = 1; i < parts.length; i++) await message.channel.send(parts[i]);
       }
     } catch (err) {
-      console.error("Gemini Error:", err?.message);
-      await message.reply("هلا بك! حصل ضغط خفيف بالاتصال، اعد المنشن وسأرد عليك فوراً ✨");
+      console.error("Gemini Error:", err?.message || err);
+      await message.reply("أهلاً بك! يرجى الانتظار ثوانٍ والمحاولة مرة أخرى.");
     }
   }
 });
