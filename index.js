@@ -1,5 +1,5 @@
 // =================================================================
-// 🤖 Ahmd Bot - النسخة النهائية المعتمدة الرسمية
+// 🤖 Ahmd Bot - النسخة الرسمية المعتمدة (gemini-3.6-flash)
 // =================================================================
 
 import { Client, GatewayIntentBits, Partials, EmbedBuilder, PermissionsBitField, ActivityType } from "discord.js";
@@ -32,17 +32,27 @@ const client = new Client({
   partials: [Partials.Channel, Partials.Message],
 });
 
-// دالة المحادثة بالنموذج الرسمي المعتمد فقط
+// دالة المحادثة بالنموذج المطلوب حصراً من Google
 async function askGemini(promptText) {
-  const response = await ai.models.generateContent({
-    model: "gemini-2.5-flash",
-    contents: promptText,
-    config: {
-      systemInstruction: SYSTEM_PROMPT,
-    },
-  });
+  const models = ["gemini-3.6-flash", "gemini-flash-latest"];
+  let lastErr = null;
 
-  return response.text;
+  for (const m of models) {
+    try {
+      const response = await ai.models.generateContent({
+        model: m,
+        contents: promptText,
+        config: {
+          systemInstruction: SYSTEM_PROMPT,
+        },
+      });
+      if (response?.text) return response.text;
+    } catch (e) {
+      lastErr = e;
+    }
+  }
+
+  throw lastErr || new Error("فشل الرد");
 }
 
 // دالة توليد الصور
