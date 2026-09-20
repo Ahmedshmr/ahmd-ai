@@ -1,5 +1,5 @@
 // =================================================================
-// 🤖 Gemini Super Bot - ذكاء اصطناعي مستمر بدون توقف + صور وتصفير
+// 🤖 Ahmd Bot - الذكاء الاصطناعي، توليد الصور، وتصفير الشات
 // =================================================================
 
 import { Client, GatewayIntentBits, Partials, EmbedBuilder, PermissionsBitField, ActivityType } from "discord.js";
@@ -13,23 +13,22 @@ const DISCORD_TOKEN = process.env.DISCORD_TOKEN;
 const rawKeys = process.env.GEMINI_API_KEY || "";
 const API_KEYS = rawKeys.split(",").map(k => k.trim()).filter(Boolean);
 
-if (!DISCORD_TOKEN) {
-  console.error("❌ تأكد من توفر DISCORD_TOKEN");
+if (!DISCORD_TOKEN || API_KEYS.length === 0) {
+  console.error("❌ تأكد من ضبط DISCORD_TOKEN و GEMINI_API_KEY في Render");
   process.exit(1);
 }
 
 let keyIndex = 0;
-function getNextGenAI() {
-  if (API_KEYS.length === 0) return null;
-  const currentKey = API_KEYS[keyIndex % API_KEYS.length];
+function getGenAI() {
+  const key = API_KEYS[keyIndex % API_KEYS.length];
   keyIndex++;
   return new GoogleGenAI({
-    apiKey: currentKey,
+    apiKey: key,
     httpOptions: { headers: { "User-Agent": "aistudio-build" } },
   });
 }
 
-const SYSTEM_PROMPT = `أنت مساعد ذكاء اصطناعي ذكي ومرح في سيرفر دسكورد، تتحدث باللغة العربية بأسلوب راقي وواضح ومفيد، وتستخدم الإيموجي المناسب.`;
+const SYSTEM_PROMPT = `أنت مساعد ذكاء اصطناعي ذكي ومرح وخبير في سيرفر دسكورد، تتحدث باللغة العربية بطلاقة وبأسلوب راقي ومفيد ومختصر مع استخدام الإيموجي المناسب.`;
 
 const client = new Client({
   intents: [
@@ -41,47 +40,29 @@ const client = new Client({
   partials: [Partials.Channel, Partials.Message],
 });
 
-// محرك ذكاء اصطناعي احتياطي مجاني 100%
-async function fetchBackupAi(promptText) {
-  try {
-    const encoded = encodeURIComponent(promptText);
-    const res = await fetch(`https://text.pollinations.ai/${encoded}?model=openai&system=${encodeURIComponent(SYSTEM_PROMPT)}`);
-    if (res.ok) {
-      const text = await res.text();
-      if (text && text.trim()) return text.trim();
-    }
-  } catch (e) {
-    console.warn("Backup AI failed:", e?.message);
-  }
-  return null;
-}
-
-// دالة المحادثة الذكية
+// دالة المحادثة النصية (تستخدم النماذج الرسمية المجانية بـ 1500 طلب يومياً)
 async function generateAiReply(promptText) {
-  const stableModels = ["gemini-2.5-flash", "gemini-2.0-flash-lite", "gemini-flash-latest"];
+  const models = ["gemini-2.0-flash", "gemini-1.5-flash", "gemini-2.0-flash-lite"];
+  let lastError = null;
 
-  for (let attempt = 0; attempt < Math.max(API_KEYS.length, 1); attempt++) {
-    const aiInstance = getNextGenAI();
-    if (!aiInstance) break;
-
-    for (const modelName of stableModels) {
+  for (let k = 0; k < Math.max(API_KEYS.length, 1); k++) {
+    const aiInstance = getGenAI();
+    for (const modelName of models) {
       try {
-        const res = await aiInstance.models.generateContent({
+        const response = await aiInstance.models.generateContent({
           model: modelName,
           contents: promptText,
           config: { systemInstruction: SYSTEM_PROMPT },
         });
-        if (res?.text) return res.text;
+        if (response?.text) return response.text;
       } catch (err) {
+        lastError = err;
         continue;
       }
     }
   }
 
-  const backupReply = await fetchBackupAi(promptText);
-  if (backupReply) return backupReply;
-
-  throw new Error("تعذر جلب الرد، حاول بعد قليل.");
+  throw lastError || new Error("تعذر الرد في الوقت الحالي");
 }
 
 // دالة توليد الصور
@@ -102,9 +83,9 @@ function getImageUrl(promptText) {
   return `https://image.pollinations.ai/prompt/${encoded}?width=1024&height=1024&nologo=true&seed=${randomSeed}`;
 }
 
-// تغيير الحالة هنا 👇
+// عند تشغيل البوت
 client.once("ready", () => {
-  console.log(`🚀 البوت متصل كـ: ${client.user.tag}`);
+  console.log(`🚀 البوت متصل وشغال كـ: ${client.user.tag}`);
   client.user.setActivity({
     name: "منشن وازهلك",
     type: ActivityType.Playing,
@@ -125,7 +106,7 @@ client.on("messageCreate", async (message) => {
   if (content === "!تصفير" || content === "!nuke" || content === "!مسح الكل" || clean === "تصفير") {
     if (!message.member.permissions.has(PermissionsBitField.Flags.ManageChannels) && 
         !message.member.permissions.has(PermissionsBitField.Flags.Administrator)) {
-      return message.reply("⛔ هذا الأمر للمشرفين فقط!");
+      return message.reply("⛔ هذا الأمر للمشرفين فقط (صلاحية Manage Channels)!");
     }
     try {
       const ch = message.channel;
@@ -135,7 +116,7 @@ client.on("messageCreate", async (message) => {
       await newCh.setPosition(pos);
 
       const embed = new EmbedBuilder()
-        .setTitle("💥 تم تصفير ومسح الشات بالكامل!")
+        .setTitle("💥 تم تصفير الشات ومسح كل الرسائل!")
         .setDescription(`تم تنظيف الروم بالكامل بواسطة المشرف: **${message.author.username}** 🧹`)
         .setColor(0xed4245)
         .setTimestamp();
@@ -207,7 +188,7 @@ client.on("messageCreate", async (message) => {
   // 4. الرد على الأسئلة والمحادثة
   if (isMentioned || content.startsWith("!ask ")) {
     if (clean.startsWith("!ask ")) clean = clean.slice(5).trim();
-    if (!clean) return message.reply("أهلاً بك! منشن وازهلك في أي سؤال أو اطلب صورة 🤖");
+    if (!clean) return message.reply("أهلاً بك! منشن وازهلك، اسألني أي سؤال 🤖");
 
     try {
       await message.channel.sendTyping();
@@ -221,16 +202,17 @@ client.on("messageCreate", async (message) => {
         for (let i = 1; i < parts.length; i++) await message.channel.send(parts[i]);
       }
     } catch (err) {
-      console.error(err);
-      await message.reply("⚠️ اسألني مرة أخرى وسأجيبك فوراً!");
+      console.error("Chat Error:", err?.message);
+      await message.reply("أهلاً بك! واجهت ضغطاً بسيطاً لثوانٍ، أعد منشن البوت وسأجيبك فوراً 🌟");
     }
   }
 });
 
+// خادم الـ Keep-Alive للبقاء متصلاً على Render
 const PORT = process.env.PORT || 3000;
 http.createServer((req, res) => {
   res.writeHead(200, { "Content-Type": "text/plain; charset=utf-8" });
-  res.end("🤖 البوت يعمل 24/7!");
+  res.end("🤖 البوت شغال 24/7!");
 }).listen(PORT);
 
 client.login(DISCORD_TOKEN);
